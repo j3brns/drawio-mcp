@@ -5,8 +5,9 @@ import {
 } from "@modelcontextprotocol/ext-apps/server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { normalizeDiagramXml, INVALID_DIAGRAM_XML_MESSAGE } from "./normalize-diagram-xml.js";
-import { buildTagMap, searchShapes } from "../../shared/shape-search.js";
+import { normalizeDiagramXml, absolutizeImageUrls, INVALID_DIAGRAM_XML_MESSAGE } from "./normalize-diagram-xml.js";
+import { buildTagMap } from "../../shared/shape-search.js";
+import { searchShapesAndIcons, DEFAULT_ICON_SERVICE_URL } from "../../shared/icon-search.js";
 
 /**
  * Build the self-contained HTML string that renders diagrams.
@@ -364,22 +365,12 @@ export function buildHtml(appWithDepsJs, pakoDeflateJs, mermaidJs, options)
         <span id="copy-xml-label">Copy</span>
       </button>
       <button id="fullscreen-btn" class="icon-only" title="Toggle fullscreen" aria-label="Toggle fullscreen">
-        <svg id="fs-icon-enter" viewBox="0 0 24 24" aria-hidden="true"><polyline points="4 8 4 4 8 4"/><polyline points="16 4 20 4 20 8"/><polyline points="20 16 20 20 16 20"/><polyline points="8 20 4 20 4 16"/></svg>
-        <svg id="fs-icon-exit" viewBox="0 0 24 24" aria-hidden="true" style="display:none"><polyline points="8 4 8 8 4 8"/><polyline points="16 4 16 8 20 8"/><polyline points="20 16 16 16 16 20"/><polyline points="4 16 8 16 8 20"/></svg>
+        <svg id="fs-icon-enter" viewBox="0 -960 960 960" aria-hidden="true"><path fill="currentColor" stroke="none" d="M120-120v-320h80v184l504-504H520v-80h320v320h-80v-184L256-200h184v80H120Z"/></svg>
+        <svg id="fs-icon-exit" viewBox="0 -960 960 960" aria-hidden="true" style="display:none"><path fill="currentColor" stroke="none" d="m136-80-56-56 264-264H160v-80h320v320h-80v-184L136-80Zm344-400v-320h80v184l264-264 56 56-264 264h184v80H480Z"/></svg>
       </button>
       <button id="expand-btn" class="icon-only" style="display:none" title="Expand vertically" aria-label="Expand vertically">
-        <svg id="expand-icon-expand" viewBox="0 0 24 24" aria-hidden="true">
-          <polyline points="8 7 12 3 16 7"/>
-          <line x1="12" y1="3" x2="12" y2="11"/>
-          <polyline points="8 17 12 21 16 17"/>
-          <line x1="12" y1="13" x2="12" y2="21"/>
-        </svg>
-        <svg id="expand-icon-collapse" viewBox="0 0 24 24" aria-hidden="true" style="display:none">
-          <polyline points="8 3 12 7 16 3"/>
-          <line x1="12" y1="7" x2="12" y2="11"/>
-          <polyline points="8 21 12 17 16 21"/>
-          <line x1="12" y1="13" x2="12" y2="17"/>
-        </svg>
+        <svg id="expand-icon-expand" viewBox="0 -960 960 960" aria-hidden="true"><path fill="currentColor" stroke="none" d="M440-520v-208l-64 64-56-56 160-160 160 160-56 56-64-62v206h-80ZM440-440v208l-64-64-56 56 160 160 160-160-56-56-64 62v-206h-80Z"/></svg>
+        <svg id="expand-icon-collapse" viewBox="0 -960 960 960" aria-hidden="true" style="display:none"><path fill="currentColor" stroke="none" d="M440-880v208l-64-64-56 56 160 160 160-160-56-56-64 62v-206h-80ZM440-80v-208l-64 64-56-56 160-160 160 160-56 56-64-62v206h-80Z"/></svg>
       </button>
       <button id="layout-btn" class="icon-only" style="display:none" title="Layout: as authored" aria-label="Cycle layout">
         <svg id="layout-icon-none" viewBox="0 0 24 24" aria-hidden="true">
@@ -448,6 +439,7 @@ export function buildHtml(appWithDepsJs, pakoDeflateJs, mermaidJs, options)
     <script>
 ${appWithDepsJs}
 ${normalizeDiagramXml.toString()}
+${absolutizeImageUrls.toString()}
 
 // --- XML healing for partial/streaming XML ---
 
@@ -4216,6 +4208,7 @@ var lastFinalizedKey = null;
 function finalizeStreamingView(xml, opts)
 {
   opts = opts || {};
+  xml = absolutizeImageUrls(xml);
 
   var key = (xml || '') + '|' + (opts.postLayout || '') + '|' + (opts.routing || '') + '|' + (opts.replaceMode ? 'r' : '');
   if (key === lastFinalizedKey)
@@ -5795,6 +5788,8 @@ app.ontoolinputpartial = function(params)
     return;
   }
 
+  healedXml = absolutizeImageUrls(healedXml);
+
   // Update loading text during streaming
   if (loadingEl.style.display !== 'none')
   {
@@ -6525,12 +6520,14 @@ function validateDiagramXml(xml)
  * @param {string} [options.xmlReference] - XML generation reference text for the tool description.
  * @param {string} [options.mermaidReference] - Mermaid syntax reference text appended to the tool description.
  * @param {Array} [options.shapeIndex] - Shape search index array from search-index.json.
+ * @param {string|null} [options.iconServiceUrl] - Base URL of the draw.io icon service used to supplement sparse search_shapes results (default: icons.diagrams.net). Pass null to disable icon supplementation.
  * @param {string} [options.buildId] - Build identifier (git SHA + timestamp). Echoed back in every tool response as `_buildId` so you can confirm which deploy you're hitting.
  * @returns {McpServer}
  */
 export function createServer(html, options = {})
 {
-  const { domain, xmlReference = "", mermaidReference = "", shapeIndex = null, buildId = "unknown" } = options;
+  const { domain, xmlReference = "", mermaidReference = "", shapeIndex = null,
+    iconServiceUrl = DEFAULT_ICON_SERVICE_URL, buildId = "unknown" } = options;
   const server = new McpServer({ name: "drawio-mcp-app", version: "1.0.0" });
 
   const resourceUri = "ui://drawio/mcp-app.html";
@@ -6581,7 +6578,7 @@ export function createServer(html, options = {})
         "- **UML class / component / deployment diagrams** where positioning carries meaning\n" +
         "- **Venn diagrams, quadrant charts, concept maps** with custom regions — anything where hand-placed geometry is the point\n" +
         "- **Any diagram requiring specific colors, fonts, stencils, or layouts** that Mermaid can't control precisely\n" +
-        "Call `search_shapes` first when you need industry icons (AWS / Azure / Cisco / P&ID / Kubernetes / floorplan / mockup / electrical) to find the correct `style` string for each shape.\n\n" +
+        "Call `search_shapes` first when you need industry icons (AWS / Azure / Cisco / P&ID / Kubernetes / floorplan / mockup / electrical) or brand logos / pictorial concept icons (e.g. 'react', 'slack', 'shopping cart') to find the correct `style` string for each shape.\n\n" +
         "---\n\n" +
         "**XML reasoning discipline (applies ONLY when you chose XML — skip this whole section if you're using Mermaid):** Your job in XML is declaring logical structure — nodes, edges, labels, groupings. Follow these steps in order: (1) **Decide `postLayout` and `routing` FIRST, before writing any XML.** If the XML diagram is a flowchart, state diagram, decision tree, or any directional/hierarchical process diagram (which you should rarely be writing as XML — prefer Mermaid), you MUST pass `postLayout: \"elk\"` (add `direction: \"horizontal\"` when the flow is drawn left-to-right; it defaults to vertical). Omit `postLayout` only when the layout carries hand-crafted meaning (swimlanes, containers, architecture, UML) — the typical reason you chose XML in the first place. When `postLayout` is set, your x/y coordinates only need to express rough direction; ELK re-lays out the vertices. For those hand-placed diagrams where you omit `postLayout`, consider `routing: \"libavoid\"` — it leaves your positions untouched and only routes the edges around the boxes in clean right angles (set it whenever connectors would otherwise overlap or cut through shapes). Treat `postLayout` and `routing` as alternatives: ELK already routes its own edges, so if you set `postLayout: \"elk\"` do NOT also set `routing` (redundant); use `routing` only on a hand-placed layout where you are NOT re-laying-out with ELK. (2) Pick ONE concrete scenario on your first impulse and commit — do not pitch alternatives, do not flip-flop between approaches. (3) Use the rigid grid in the XML reference (`x = col*180 + 40`, `y = row*120 + 40`) without computing spacings, canvas dimensions, or overlap checks. (4) Never add `<Array as=\"points\">` waypoints or `exitX/exitY/entryX/entryY` — when postLayout or routing runs it sets them; otherwise drawio's edge router handles it. (5) Do NOT narrate in your reasoning: no \"building the diagram\", no column enumeration, no coordinate math in prose, no coordinate re-verification after placement. Go straight to XML.\n\n" +
         "**User preference override — XML only.** If the user expresses a preference for draw.io XML over Mermaid in any phrasing (examples: \"no mermaid\", \"skip mermaid\", \"use xml\", \"I want drawio format\", \"stop using mermaid\", \"give me the xml\", \"native drawio only\", etc.), from that point onward in the conversation you MUST use the `xml` parameter exclusively and MUST NOT use the `mermaid` parameter, even for diagram types where Mermaid would normally be preferable. This preference persists for the remainder of the conversation unless the user clearly reverses it (e.g. \"mermaid is fine again\"). When the preference is active, translate any diagram request — including flowcharts, sequence diagrams, ER diagrams, etc. — directly to well-formed mxGraphModel XML.\n\n" +
@@ -6674,7 +6671,7 @@ export function createServer(html, options = {})
         };
       }
 
-      var xmlPayload = { xml: normalizedXml };
+      var xmlPayload = { xml: absolutizeImageUrls(normalizedXml) };
       if (postLayout) xmlPayload.postLayout = postLayout;
       // direction + routing are XML-only; Mermaid derives direction from the
       // flowchart code and its layout already routes, so routing is omitted there.
@@ -6723,14 +6720,17 @@ export function createServer(html, options = {})
         title: "Search Shapes",
         description:
           "Search the draw.io shape library by keywords. Returns matching shapes with " +
-          "their exact style strings, dimensions, and titles. Use ONLY for diagrams that " +
-          "need industry-specific or branded icons (cloud architecture, network topology, " +
-          "P&ID, electrical, Cisco, Kubernetes, BPMN). Do NOT use for standard diagram " +
-          "types like flowcharts, UML, ERD, org charts, or mind maps — these use basic " +
-          "geometric shapes (rectangles, diamonds, circles, cylinders) that are already " +
-          "covered in the XML reference. Also skip if the user asks to use basic/simple " +
-          "shapes or says not to search. The style string from the results can be " +
-          "used directly in mxCell style attributes.",
+          "their exact style strings, dimensions, and titles. Covers ~10,000 built-in " +
+          "stencils (cloud architecture, network topology, P&ID, electrical, Cisco, " +
+          "Kubernetes, BPMN) and, when those are sparse, supplements results with the " +
+          "draw.io icon service (brand/product logos and general-purpose concept icons, " +
+          "e.g. 'react', 'slack', 'shopping cart', 'solar panel'). Use ONLY for diagrams " +
+          "that need industry-specific, branded, or pictorial icons. Do NOT use for " +
+          "standard diagram types like flowcharts, UML, ERD, org charts, or mind maps — " +
+          "these use basic geometric shapes (rectangles, diamonds, circles, cylinders) " +
+          "that are already covered in the XML reference. Also skip if the user asks to " +
+          "use basic/simple shapes or says not to search. The style string from the " +
+          "results can be used directly in mxCell style attributes.",
         inputSchema:
         {
           query: z
@@ -6761,7 +6761,8 @@ export function createServer(html, options = {})
       async function({ query, limit })
       {
         var maxLimit = Math.min(limit || 10, 50);
-        var results = searchShapes(shapeIndex, tagMap, query, maxLimit);
+        var results = await searchShapesAndIcons(shapeIndex, tagMap, query,
+          maxLimit, { serviceUrl: iconServiceUrl });
 
         if (results.length === 0)
         {
@@ -6798,7 +6799,9 @@ export function createServer(html, options = {})
                 ...(domain ? { domain } : {}),
                 csp:
                 {
-                  resourceDomains: ["https://viewer.diagrams.net", "https://app.diagrams.net"],
+                  // icons.diagrams.net: remote icon images referenced by
+                  // search_shapes icon-service results (shape=image styles)
+                  resourceDomains: ["https://viewer.diagrams.net", "https://app.diagrams.net", "https://icons.diagrams.net"],
                   connectDomains: ["https://viewer.diagrams.net"],
                 },
               },

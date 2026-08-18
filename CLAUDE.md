@@ -5,12 +5,16 @@ The official draw.io MCP (Model Context Protocol) server that enables LLMs to op
 ## Repository Structure
 
 - **`.claude-plugin/marketplace.json`** — Claude Code plugin marketplace manifest. Lists this repo's plugins (currently just `drawio`, sourced from `./plugins/claude-code`); plugin metadata is inherited from each plugin's own `plugin.json`. Users install with `/plugin marketplace add jgraph/drawio-mcp` then `/plugin install drawio@drawio`.
+- **`.agents/plugins/marketplace.json`** — Codex CLI plugin marketplace manifest (Codex's format: `source` object + `policy` + `category`). Lists the `drawio` plugin sourced from `./plugins/codex/drawio`; metadata is inherited from that plugin's own `.codex-plugin/plugin.json`. Users install with `codex plugin marketplace add jgraph/drawio-mcp` then `codex plugin add drawio@drawio`.
+- **`.github/plugin/marketplace.json`** — GitHub Copilot CLI plugin marketplace manifest (same schema family as Claude's, but plugin metadata is inlined in the `plugins[]` entry rather than inherited — keep it in sync with `plugins/copilot/plugin.json`). Lists the `drawio` plugin sourced from `./plugins/copilot`. Users install with `copilot plugin marketplace add jgraph/drawio-mcp` then `copilot plugin install drawio@drawio`. Copilot CLI checks this path first and falls back to `.claude-plugin/marketplace.json`.
 - **`shared/`** — Shared XML generation reference (`xml-reference.md`), the single source of truth for all LLM prompts.
-- **`mcp-app-server/`** — MCP App server (renders diagrams inline in chat via iframe). Hosted at `https://mcp.draw.io/mcp`. Can also be self-hosted via Node.js or Cloudflare Workers.
+- **`mcp-app-server/`** — MCP App server (renders diagrams inline in chat via iframe). Hosted at `https://mcp.draw.io/mcp`. Can also be self-hosted via Node.js or Cloudflare Workers. Its `server.json` is the MCP Community Registry manifest (`io.draw/mcp` — feeds github.com/mcp and VS Code's MCP browser); publish runbook in its README.
 - **`mcp-tool-server/`** — Original MCP tool server (stdio-based, opens browser). Published as `@drawio/mcp` on npm.
 - **`project-instructions/`** — Claude Project instructions (no MCP required, no install).
 - **`plugins/`** — Assistant-side plugins grouped by host, one subdirectory per AI assistant.
   - **`plugins/claude-code/`** — Claude Code plugin: ships the `drawio` skill (generates native `.drawio` files, authored as Mermaid — converted + laid out by the desktop CLI — or as XML directly with optional ELK `--layout`; exports to PNG/SVG/PDF, or opens as a browser URL via `app.diagrams.net`). Mermaid conversion, ELK layout, and image export need draw.io Desktop; plain XML `.drawio`/`url` output does not. Installable via the repo-root marketplace or `claude --plugin-dir ./plugins/claude-code`. No MCP required.
+  - **`plugins/codex/drawio/`** — Codex CLI plugin: the Codex port of the Claude Code plugin, shipping the same `drawio` skill. `skills/drawio/SKILL.md` is byte-identical to the Claude plugin's copy (Codex uses the same `/drawio:drawio` invocation and fetches the same shared references from GitHub). Differs only in host wrapping: a `.codex-plugin/plugin.json` manifest with an `interface` block (official draw.io SVG logo, `brandColor`, default prompts). Nested under `codex/` because Codex requires the plugin root folder name to equal `plugin.json` `"name"` (`drawio`). No MCP required.
+  - **`plugins/copilot/`** — GitHub Copilot CLI plugin: the Copilot port of the Claude Code plugin, shipping the same `drawio` skill. `skills/drawio/SKILL.md` is byte-identical to the Claude plugin's copy (the in-skill `/drawio:drawio` example lines are model-facing; Copilot's user-facing command is plain `/drawio` since Copilot doesn't prefix plugin skills). Differs only in host wrapping: a root `plugin.json` manifest (Copilot's format, `skills` directory list); no folder-name rule, so `copilot/` is itself the plugin root. The same skill folder also works in other Copilot surfaces (VS Code agent mode, coding agent, code review) when copied to a repo's `.github/skills/`. No MCP required.
 - **`shape-search/`** — Shape search index generator. Loads draw.io's `app.min.js` via jsdom to extract all shape styles and tags into `search-index.json`, which powers the `search_shapes` MCP tool. Re-run after updating `drawio-dev` to pick up new or changed shapes.
 
 Most subdirectories have their own `CLAUDE.md` with implementation details.
@@ -28,8 +32,8 @@ Most subdirectories have their own `CLAUDE.md` with implementation details.
 - **Input**: `{ query: string, limit?: number }` - Search keywords and optional max results (default: 10, max: 50)
 - **Output**: Array of matching shapes with `{style, w, h, title}` — style strings can be used directly in mxCell attributes
 - **Search**: AND logic across space-separated terms, exact + Soundex phonetic matching
-- **Coverage**: ~10,000+ shapes across all draw.io libraries (AWS, Azure, GCP, P&ID, electrical, Cisco, Kubernetes, UML, BPMN, etc.)
-- **Use case**: Call before `create_diagram` only for diagrams needing industry-specific icons (cloud, network, P&ID, electrical, Cisco, Kubernetes). Skip for standard diagrams (flowcharts, UML, ERD, org charts) that use basic geometric shapes
+- **Coverage**: ~10,000+ shapes across all draw.io libraries (AWS, Azure, GCP, P&ID, electrical, Cisco, Kubernetes, UML, BPMN, etc.), supplemented live by the draw.io icon service (`icons.diagrams.net` — brand logos and general-purpose concept icons, returned as `shape=image` styles) when the local index has no strong match
+- **Use case**: Call before `create_diagram` only for diagrams needing industry-specific, branded, or pictorial icons (cloud, network, P&ID, electrical, Cisco, Kubernetes, product logos). Skip for standard diagrams (flowcharts, UML, ERD, org charts) that use basic geometric shapes
 
 ## MCP Tool Server Tools
 
@@ -80,7 +84,7 @@ Opens the draw.io editor with a Mermaid.js diagram definition.
 
 ### `search_shapes`
 
-Searches the draw.io shape library by keywords (same tool as the app server's `search_shapes`, sharing `shared/shape-search.js`). The ~4.6 MB index is not bundled in the npm package — it is fetched from the CDN on first use (overridable via `DRAWIO_SHAPE_INDEX_URL`), or read locally in an in-repo checkout.
+Searches the draw.io shape library by keywords (same tool as the app server's `search_shapes`, sharing `shared/shape-search.js` and `shared/icon-search.js`). The ~4.6 MB index is not bundled in the npm package — it is fetched from the CDN on first use (overridable via `DRAWIO_SHAPE_INDEX_URL`), or read locally in an in-repo checkout. Results are supplemented live from the draw.io icon service when the local index has no strong match (overridable via `DRAWIO_ICON_SERVICE_URL`, set to `off` to disable).
 
 **Parameters:**
 - `query` (required): Space-separated search keywords (e.g. `aws lambda`, `cisco router`, `kubernetes pod`)
